@@ -1,0 +1,184 @@
+name: Exercise-03-tests-workflow
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  Exercise-03-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Prerequisite
+        run: |
+          git clone https://$GH_PAT@github.com/Cyber-Education-Center/ExerciseTests-Utils.git/ utils
+          cd utils
+          g++ printMessage.cpp -o printMessage
+          chmod +x printMessage
+          mv printMessage ..
+          mv CodesToMessages.csv ..
+          cd ..
+          rm -rf utils
+          
+          git clone https://$GH_PAT@github.com/Cyber-Education-Center/ExerciseTests-Ex03.git ex3
+          mv ex3/*.txt ex3/*.cpp .
+          rm -rf ex3
+
+          cat <<EOF > results.json
+          {
+            "grades": {
+              "part1": 0,
+              "part2": 0,
+              "part3": 0,
+              "part4": 0,
+              "bonus": 0,
+              "memory": 0
+            }
+          }
+          EOF
+        env:
+          GH_PAT: ${{ secrets.GIT_TOKEN }}
+          
+      - name: Refresh Ubuntu package indexes
+        run: sudo apt-get update
+
+
+      - name: Cache and Install Valgrind
+        uses: awalsh128/cache-apt-pkgs-action@latest
+        with:
+          packages: valgrind
+          version: 1.0
+          
+      - name: Verify submission
+        run: |
+          git clone https://$GH_PAT@github.com/Cyber-Education-Center/ExerciseTests-VerifySubmittedFiles.git verifysubmittedfiles
+          cd verifysubmittedfiles
+          go build .
+          chmod +x filesverifier
+          mv filesverifier ..
+          cd ..
+          rm -rf verifysubmittedfiles
+          ./filesverifier PreSubmissionChecker.txt 5
+          ./filesverifier PreSubmissionChecker.txt 2
+          ./filesverifier PreSubmissionChecker.txt 4
+        env:
+          GH_PAT: ${{ secrets.GIT_TOKEN }}
+
+      - name: Compile Part 1
+        run: |
+          ./filesverifier Part1Checker.txt 1
+          mv Ex3Part1Test.cpp temp123/Ex3Part1Test.cpp
+          cd temp123 
+          g++ Vector.cpp Ex3Part1Test.cpp -o exec1 
+          mv exec1 .. 
+          cd ..
+          chmod +x exec1
+
+      - name: Run Part 1
+        run: |
+          ./exec1
+          score=10
+          jq ".grades.part1 = $score" results.json > tmp.json && mv tmp.json results.json
+
+      - name: Compile Part 2
+        run: |
+          ./filesverifier Part2Checker.txt 1
+          mv Ex3Part2Test.cpp temp123/
+          cd temp123 
+          g++ Vector.cpp Ex3Part2Test.cpp -o exec2 
+          mv exec2 .. 
+          cd ..
+          chmod +x exec2
+
+      - name: Run Part 2
+        run: |
+          ./exec2
+          score=35
+          jq ".grades.part2 = $score" results.json > tmp.json && mv tmp.json results.json
+
+      - name: Compile Part 3
+        run: |
+          ./filesverifier Part3Checker.txt 1
+          mv Ex3Part3Test.cpp temp123/
+          cd temp123 
+          g++ Vector.cpp Ex3Part3Test.cpp -o exec3 
+          mv exec3 .. 
+          cd ..
+          chmod +x exec3
+
+      - name: Run Part 3
+        run: |
+          ./exec3
+          score=35
+          jq ".grades.part3 = $score" results.json > tmp.json && mv tmp.json results.json
+
+      - name: Compile Part 4
+        run: |
+          ./filesverifier Part4Checker.txt 1
+          mv Ex3Part4Test.cpp temp123/Ex3Part4Test.cpp
+          cd temp123 
+          g++ Vector.cpp Ex3Part4Test.cpp -o exec4 
+          mv exec4 .. 
+          cd ..
+          chmod +x exec4
+
+      - name: Run Part 4
+        run: |
+          ./exec4 4
+          score=20
+          jq ".grades.part4 = $score" results.json > tmp.json && mv tmp.json results.json
+
+      - name: Compile Bonus
+        run: |
+          ./filesverifier BonusChecker.txt 1
+          mv Ex3BonusTest.cpp temp123/Ex3BonusTest.cpp
+          cd temp123 
+          g++ Vector.cpp Ex3BonusTest.cpp -o execbonus 
+          mv execbonus .. 
+          cd ..
+          chmod +x execbonus
+
+      - name: Run Bonus
+        run: |
+          ./execbonus
+          jq ".grades.bonus = -1" results.json > tmp.json && mv tmp.json results.json
+
+      - name: Memory Checks
+        run: |
+          git clone https://$GH_PAT@github.com/Cyber-Education-Center/ExerciseTests-ValgrindVarifier.git/ valgrindvarifierDIR
+          cd valgrindvarifierDIR
+          g++ ValgrindVarifier.cpp -o valgrindverifier
+          chmod +x valgrindverifier
+          mv valgrindverifier ..
+          cd ..
+          rm -rf valgrindvarifierDIR
+
+          valgrind --leak-check=yes --log-file=valgrind1.txt ./exec1
+          ./valgrindverifier valgrind1.txt
+
+          valgrind --leak-check=yes --log-file=valgrind2.txt ./exec2
+          ./valgrindverifier valgrind2.txt
+
+          valgrind --leak-check=yes --log-file=valgrind3.txt ./exec3
+          ./valgrindverifier valgrind3.txt
+
+          valgrind --leak-check=yes --log-file=valgrind4.txt ./exec4 4
+          ./valgrindverifier valgrind4.txt
+
+          valgrind --leak-check=yes --log-file=valgrindbonus.txt ./execbonus
+          ./valgrindverifier valgrindbonus.txt
+          
+          score=-1
+          jq ".grades.memory = $score" results.json > tmp.json && mv tmp.json results.json
+        env:
+          GH_PAT: ${{ secrets.GIT_TOKEN }}
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "All tests completed."
+          echo -n "Final results.json:"; cat results.json | tr -d '\n'
